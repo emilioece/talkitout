@@ -20,8 +20,8 @@ export default function HomePage() {
             <circle cx="1547.11" cy="296.69" r="28.712" fill="white"/>
             <circle cx="1445.03" cy="296.69" r="28.712" fill="white"/>
             <defs>
-              <filter id="filter0_d_12_114" x="0.18993" y="131.328" width="2111.35" height="398.937" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
-                <feFlood flood-opacity="0" result="BackgroundImageFix"/>
+              <filter id="filter0_d_12_114" x="0.18993" y="131.328" width="2111.35" height="398.937" filterUnits="userSpaceOnUse" colorInterpolationFilters="sRGB">
+                <feFlood floodOpacity="0" result="BackgroundImageFix"/>
                 <feColorMatrix in="SourceAlpha" type="matrix" values="0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 127 0" result="hardAlpha"/>
                 <feOffset dy="25.5217"/>
                 <feGaussianBlur stdDeviation="12.7609"/>
