@@ -3,6 +3,50 @@
 import { useState, useEffect, useRef } from "react";
 import Link from "next/link";
 
+// Web Speech API types
+interface SpeechRecognitionEvent {
+  results: SpeechRecognitionResultList;
+  resultIndex: number;
+  interpretation: unknown;
+  emma: Document | null;
+}
+
+interface SpeechRecognitionResultList {
+  length: number;
+  item(index: number): SpeechRecognitionResult;
+  [index: number]: SpeechRecognitionResult;
+}
+
+interface SpeechRecognitionResult {
+  length: number;
+  item(index: number): SpeechRecognitionAlternative;
+  [index: number]: SpeechRecognitionAlternative;
+  isFinal: boolean;
+}
+
+interface SpeechRecognitionAlternative {
+  transcript: string;
+  confidence: number;
+}
+
+interface SpeechRecognitionErrorEvent extends Event {
+  error: string;
+  message: string;
+}
+
+interface SpeechRecognition extends EventTarget {
+  continuous: boolean;
+  interimResults: boolean;
+  lang: string;
+  start(): void;
+  stop(): void;
+  abort(): void;
+  onresult: ((event: SpeechRecognitionEvent) => void) | null;
+  onerror: ((event: SpeechRecognitionErrorEvent) => void) | null;
+  onend: ((event: Event) => void) | null;
+  onstart: ((event: Event) => void) | null;
+}
+
 type Message = {
   role: "user" | "assistant" | "system";
   content: string;
@@ -29,9 +73,42 @@ export default function ChatPage() {
   const [feedback, setFeedback] = useState<Feedback | null>(null);
   const [isAudioPlaying, setIsAudioPlaying] = useState(false);
   const [permissionGranted, setPermissionGranted] = useState<boolean | null>(null);
+  const [isTyping, setIsTyping] = useState(false);
+  const [autoPlayEnabled, setAutoPlayEnabled] = useState(true);
   
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const currentPlayingMessageRef = useRef<string>("");
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
+  const recognitionRef = useRef<SpeechRecognition | null>(null);
+  
+  // Initialize Web Speech API
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      // @ts-expect-error - Web Speech API types are not fully supported in TypeScript
+      const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+      if (SpeechRecognition) {
+        recognitionRef.current = new SpeechRecognition();
+        if (recognitionRef.current) {
+          recognitionRef.current.continuous = true;
+          recognitionRef.current.interimResults = true;
+          
+          recognitionRef.current.onresult = (event: SpeechRecognitionEvent) => {
+            const transcript = Array.from(event.results)
+              .map((result) => result[0])
+              .map((result) => result.transcript)
+              .join('');
+              
+            setTranscript(transcript);
+          };
+          
+          recognitionRef.current.onerror = (event: SpeechRecognitionErrorEvent) => {
+            console.error('Speech recognition error', event.error);
+            setIsRecording(false);
+          };
+        }
+      }
+    }
+  }, []);
   
   // Handle microphone permissions
   const requestMicPermission = async () => {
@@ -54,6 +131,36 @@ export default function ChatPage() {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
+  useEffect(() => {
+    if (audioRef.current) {
+      // Handle audio completion
+      audioRef.current.onended = () => {
+        console.log('Audio playback ended');
+        setIsAudioPlaying(false);
+        currentPlayingMessageRef.current = "";
+      };
+      
+      // Handle errors
+      audioRef.current.onerror = (e) => {
+        console.error('Audio playback error:', e);
+        setIsAudioPlaying(false);
+        currentPlayingMessageRef.current = "";
+      };
+      
+      // Handle successful play
+      audioRef.current.onplay = () => {
+        console.log('Audio playback started');
+        setIsAudioPlaying(true);
+      };
+      
+      // Handle pause
+      audioRef.current.onpause = () => {
+        console.log('Audio playback paused');
+        setIsAudioPlaying(false);
+      };
+    }
+  }, []);
+
   const toggleRecording = async () => {
     if (!permissionGranted) {
       await requestMicPermission();
@@ -71,69 +178,184 @@ export default function ChatPage() {
     setIsRecording(true);
     setTranscript("");
     
-    // In a real implementation, we would use the Web Speech API or a similar service
-    // For this MVP, we'll simulate with setTimeout
-    
-    // Logic for starting recording would go here
+    // Start Web Speech API recording
+    if (recognitionRef.current) {
+      try {
+        recognitionRef.current.start();
+      } catch (err) {
+        console.error("Failed to start speech recognition:", err);
+      }
+    }
   };
 
   const stopRecording = async () => {
     setIsRecording(false);
     setIsProcessing(true);
     
-    // For MVP, simulate transcription - in reality would process actual audio
-    // Simulate a delay for transcription
-    setTimeout(async () => {
-      // Simulated transcript - in real app we'd get this from speech recognition API
-      const simulatedTranscript = "Hi, I wanted to talk to you about the project deadlines. I've noticed that you've been missing some of them lately, and it's affecting the team's progress.";
+    // Stop Web Speech API recording
+    if (recognitionRef.current) {
+      recognitionRef.current.stop();
+    }
+    
+    // For MVP, if we don't have a transcript, use a simulated one
+    const finalTranscript = transcript || 
+      "Hi, I wanted to talk to you about the project deadlines. I've noticed that you've been missing some of them lately, and it's affecting the team's progress.";
+    
+    // Add user message
+    const updatedMessages: Message[] = [...messages, { role: "user", content: finalTranscript }];
+    setMessages(updatedMessages);
+    
+    // Send to API and get response
+    try {
+      const newInteractionCount = interactionCount + 1;
+      setInteractionCount(newInteractionCount);
       
-      setTranscript(simulatedTranscript);
+      // Show typing indicator
+      setIsTyping(true);
       
-      // Add user message
-      const updatedMessages: Message[] = [...messages, { role: "user", content: simulatedTranscript }];
-      setMessages(updatedMessages);
+      console.log(`Sending message to chat API (interaction ${newInteractionCount}/3)`);
       
-      // Send to API and get response
-      try {
-        const newInteractionCount = interactionCount + 1;
-        setInteractionCount(newInteractionCount);
-        
-        // In a real implementation, this would be an API call to process with ChatGPT
-        // For the MVP, simulate a response
-        setTimeout(() => {
-          const aiResponse = "I'm sorry about that. I've been struggling with the workload lately. There have been some personal issues that have affected my focus, but I didn't want to make excuses. I should have communicated this better.";
-          
-          const newMessages: Message[] = [...updatedMessages, { role: "assistant", content: aiResponse }];
-          setMessages(newMessages);
-          
-          // Generate and play audio for the response
-          // For MVP, we'll just set a URL but in production would generate with ElevenLabs
-          if (audioRef.current) {
-            audioRef.current.src = "/sample-audio.mp3"; // Would be an API call to ElevenLabs
-            audioRef.current.play()
-              .then(() => setIsAudioPlaying(true))
-              .catch(err => console.error("Audio playback error:", err));
-          }
-          
-          // Check if we need to generate feedback (after 3 interactions)
-          if (newInteractionCount >= 3) {
-            generateFeedback();
-          }
-          
-          setIsProcessing(false);
-        }, 1500);
-        
-      } catch (error) {
-        console.error("Error processing message:", error);
-        setIsProcessing(false);
+      // Get response from the ChatGPT API
+      const chatResponse = await fetch('/api/chat', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ 
+          messages: updatedMessages,
+          interactionCount: newInteractionCount 
+        }),
+      });
+      
+      if (!chatResponse.ok) {
+        throw new Error(`Chat API returned ${chatResponse.status}`);
       }
-    }, 1000);
+      
+      const chatData = await chatResponse.json();
+      console.log('Received response from chat API:', chatData);
+      
+      if (chatData.success) {
+        const aiResponse = chatData.response.message;
+        
+        // Add assistant message
+        const newMessages: Message[] = [...updatedMessages, { role: "assistant", content: aiResponse }];
+        setMessages(newMessages);
+        
+        // Hide typing indicator
+        setIsTyping(false);
+        
+        // Automatically play audio for the response
+        if (autoPlayEnabled) {
+          console.log('Auto-play enabled, playing response audio');
+          await playResponseAudio(aiResponse);
+        }
+        
+        // Check if we need to generate feedback (after 3 interactions)
+        if (newInteractionCount >= 3 && chatData.generateFeedback && chatData.response.feedback) {
+          console.log('Generating feedback after final interaction');
+          generateFeedback(chatData.response.feedback);
+        }
+      } else {
+        // Handle API error with fallback response
+        console.error('Chat API returned error:', chatData.error);
+        const fallbackResponse = "I understand your concern. Let me think about how to improve my work on deadlines.";
+        const newMessages: Message[] = [...updatedMessages, { role: "assistant", content: fallbackResponse }];
+        setMessages(newMessages);
+        
+        // Hide typing indicator
+        setIsTyping(false);
+      }
+      
+      setIsProcessing(false);
+    } catch (error) {
+      console.error("Error processing message:", error);
+      
+      // Hide typing indicator
+      setIsTyping(false);
+      setIsProcessing(false);
+      
+      // Fallback response
+      const fallbackResponse = "I'm sorry, I'm having trouble understanding. Could you try again?";
+      const newMessages: Message[] = [...updatedMessages, { role: "assistant", content: fallbackResponse }];
+      setMessages(newMessages);
+    }
   };
 
-  const generateFeedback = () => {
-    // In real implementation, this would be an API call to process the conversation
-    // For MVP, we'll simulate feedback
+  const playResponseAudio = async (text: string) => {
+    try {
+      // If we are already playing this message, toggle pause/play
+      if (currentPlayingMessageRef.current === text && audioRef.current) {
+        if (audioRef.current.paused) {
+          console.log('Resuming audio playback');
+          await audioRef.current.play()
+            .catch(err => {
+              console.error("Audio resume error:", err);
+              setIsAudioPlaying(false);
+            });
+        } else {
+          console.log('Pausing audio playback');
+          audioRef.current.pause();
+        }
+        return;
+      }
+      
+      // Stop any currently playing audio
+      if (audioRef.current && !audioRef.current.paused) {
+        console.log('Stopping previous audio playback');
+        audioRef.current.pause();
+        setIsAudioPlaying(false);
+      }
+      
+      // Start new audio process
+      setIsAudioPlaying(true); // Show loading state immediately
+      currentPlayingMessageRef.current = text;
+      
+      console.log('Requesting audio for message:', text.substring(0, 30) + '...');
+      
+      // Call the speech API to generate audio
+      const response = await fetch('/api/speech', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ text }),
+      });
+      
+      const data = await response.json();
+      
+      if (data.success && audioRef.current) {
+        console.log('Received audio data, setting up source');
+        
+        // Create a new Audio element to avoid any stale state issues
+        audioRef.current.src = data.audioUrl;
+        
+        // The onplay event will set isAudioPlaying to true
+        console.log('Starting audio playback');
+        await audioRef.current.play()
+          .catch(err => {
+            console.error("Audio playback start error:", err);
+            setIsAudioPlaying(false);
+            currentPlayingMessageRef.current = "";
+          });
+      } else {
+        console.error("Failed to get audio URL from speech API");
+        setIsAudioPlaying(false);
+        currentPlayingMessageRef.current = "";
+      }
+    } catch (error) {
+      console.error("Error generating audio:", error);
+      setIsAudioPlaying(false);
+      currentPlayingMessageRef.current = "";
+    }
+  };
+
+  const generateFeedback = (apiFeedback?: Feedback) => {
+    if (apiFeedback) {
+      setFeedback(apiFeedback);
+      return;
+    }
     
+    // Fallback to simulated feedback if none provided from API
     setTimeout(() => {
       setFeedback({
         strengths: [
@@ -151,18 +373,16 @@ export default function ChatPage() {
         ],
         summary: "You demonstrated good basic conflict resolution skills by addressing the issue directly. To improve, focus on being more specific about the problem while showing more empathy and offering concrete solutions."
       });
-    }, 2000);
+    }, 1000);
   };
 
-  const playAudio = () => {
-    if (audioRef.current) {
-      // In a real implementation, we would generate audio for the specific message
-      // For MVP, we use a sample audio file
-      audioRef.current.src = "/sample-audio.mp3";
-      audioRef.current.play()
-        .then(() => setIsAudioPlaying(true))
-        .catch(err => console.error("Audio playback error:", err));
-    }
+  const playAudio = (messageText: string) => {
+    playResponseAudio(messageText)
+      .catch(err => {
+        console.error("Error playing response audio:", err);
+        setIsAudioPlaying(false);
+        currentPlayingMessageRef.current = "";
+      });
   };
 
   const resetConversation = () => {
@@ -172,6 +392,7 @@ export default function ChatPage() {
     }]);
     setInteractionCount(0);
     setFeedback(null);
+    setTranscript("");
   };
 
   return (
@@ -184,18 +405,39 @@ export default function ChatPage() {
             <span>ItOut</span>
           </Link>
           
-          {feedback ? (
-            <button 
-              onClick={resetConversation}
-              className="text-blue-600 hover:text-blue-800"
-            >
-              Start New Conversation
-            </button>
-          ) : (
-            <div className="text-sm text-gray-500">
-              {interactionCount > 0 && `Interaction ${interactionCount}/3`}
+          <div className="flex items-center gap-4">
+            {/* Auto-play toggle */}
+            <div className="flex items-center gap-2">
+              <span className="text-sm text-gray-700">Auto-play:</span>
+              <button 
+                onClick={() => setAutoPlayEnabled(!autoPlayEnabled)}
+                className={`relative inline-flex h-6 w-11 items-center rounded-full ${
+                  autoPlayEnabled ? 'bg-blue-600' : 'bg-gray-300'
+                }`}
+                aria-pressed={autoPlayEnabled}
+                aria-label="Toggle auto-play"
+              >
+                <span 
+                  className={`inline-block h-4 w-4 transform rounded-full bg-white transition ${
+                    autoPlayEnabled ? 'translate-x-6' : 'translate-x-1'
+                  }`} 
+                />
+              </button>
             </div>
-          )}
+            
+            {feedback ? (
+              <button 
+                onClick={resetConversation}
+                className="text-blue-600 hover:text-blue-800"
+              >
+                Start New Conversation
+              </button>
+            ) : (
+              <div className="text-sm text-gray-700">
+                {interactionCount > 0 && `Interaction ${interactionCount}/3`}
+              </div>
+            )}
+          </div>
         </div>
       </header>
 
@@ -213,7 +455,7 @@ export default function ChatPage() {
                     className={`rounded-lg p-3 max-w-[80%] ${
                       message.role === "user" 
                         ? "bg-blue-600 text-white" 
-                        : "bg-white border border-gray-200"
+                        : "bg-white border border-gray-200 text-black"
                     }`}
                   >
                     <div className="flex justify-between items-start gap-2">
@@ -221,16 +463,31 @@ export default function ChatPage() {
                       
                       {message.role === "assistant" && (
                         <button 
-                          onClick={() => playAudio()}
-                          className={`mt-1 ${isAudioPlaying ? "text-blue-500" : "text-gray-400 hover:text-gray-600"}`}
-                          aria-label={isAudioPlaying ? "Audio playing" : "Play audio"}
-                          disabled={isAudioPlaying}
+                          onClick={() => playAudio(message.content)}
+                          className={`mt-1 ${
+                            isAudioPlaying && currentPlayingMessageRef.current === message.content 
+                              ? "text-blue-500" 
+                              : "text-gray-600 hover:text-gray-800"
+                          }`}
+                          aria-label={
+                            isAudioPlaying && currentPlayingMessageRef.current === message.content 
+                              ? "Pause audio" 
+                              : "Play audio"
+                          }
                         >
-                          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
-                            <path d="M11.536 14.01A8.473 8.473 0 0 0 14.026 8a8.473 8.473 0 0 0-2.49-6.01l-.708.707A7.476 7.476 0 0 1 13.025 8c0 2.071-.84 3.946-2.197 5.303l.708.707z"/>
-                            <path d="M10.121 12.596A6.48 6.48 0 0 0 12.025 8a6.48 6.48 0 0 0-1.904-4.596l-.707.707A5.483 5.483 0 0 1 11.025 8a5.483 5.483 0 0 1-1.61 3.89l.706.706z"/>
-                            <path d="M8.707 11.182A4.486 4.486 0 0 0 10.025 8a4.486 4.486 0 0 0-1.318-3.182L8 5.525A3.489 3.489 0 0 1 9.025 8 3.49 3.49 0 0 1 8 10.475l.707.707zM6.717 3.55A.5.5 0 0 1 7 4v8a.5.5 0 0 1-.812.39L3.825 10.5H1.5A.5.5 0 0 1 1 10V6a.5.5 0 0 1 .5-.5h2.325l2.363-1.89a.5.5 0 0 1 .529-.06z"/>
-                          </svg>
+                          {isAudioPlaying && currentPlayingMessageRef.current === message.content ? (
+                            // Pause icon
+                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
+                              <path d="M5.5 3.5A1.5 1.5 0 0 1 7 5v6a1.5 1.5 0 0 1-3 0V5a1.5 1.5 0 0 1 1.5-1.5zm5 0A1.5 1.5 0 0 1 12 5v6a1.5 1.5 0 0 1-3 0V5a1.5 1.5 0 0 1 1.5-1.5z"/>
+                            </svg>
+                          ) : (
+                            // Play icon 
+                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
+                              <path d="M11.536 14.01A8.473 8.473 0 0 0 14.026 8a8.473 8.473 0 0 0-2.49-6.01l-.708.707A7.476 7.476 0 0 1 13.025 8c0 2.071-.84 3.946-2.197 5.303l.708.707z"/>
+                              <path d="M10.121 12.596A6.48 6.48 0 0 0 12.025 8a6.48 6.48 0 0 0-1.904-4.596l-.707.707A5.483 5.483 0 0 1 11.025 8a5.483 5.483 0 0 1-1.61 3.89l.706.706z"/>
+                              <path d="M8.707 11.182A4.486 4.486 0 0 0 10.025 8a4.486 4.486 0 0 0-1.318-3.182L8 5.525A3.489 3.489 0 0 1 9.025 8 3.49 3.49 0 0 1 8 10.475l.707.707zM6.717 3.55A.5.5 0 0 1 7 4v8a.5.5 0 0 1-.812.39L3.825 10.5H1.5A.5.5 0 0 1 1 10V6a.5.5 0 0 1 .5-.5h2.325l2.363-1.89a.5.5 0 0 1 .529-.06z"/>
+                            </svg>
+                          )}
                         </button>
                       )}
                     </div>
@@ -238,18 +495,32 @@ export default function ChatPage() {
                 )}
                 
                 {message.role === "system" && (
-                  <div className="bg-gray-100 rounded-lg p-3 w-full text-center text-gray-600">
+                  <div className="bg-gray-100 rounded-lg p-3 w-full text-center text-black font-medium">
                     {message.content}
                   </div>
                 )}
               </div>
             ))}
+            
+            {/* Typing indicator */}
+            {isTyping && (
+              <div className="flex justify-start">
+                <div className="bg-white border border-gray-200 rounded-lg p-3 max-w-[80%]">
+                  <div className="flex space-x-2">
+                    <div className="w-2 h-2 rounded-full bg-gray-400 animate-bounce" style={{ animationDelay: '0ms' }}></div>
+                    <div className="w-2 h-2 rounded-full bg-gray-400 animate-bounce" style={{ animationDelay: '300ms' }}></div>
+                    <div className="w-2 h-2 rounded-full bg-gray-400 animate-bounce" style={{ animationDelay: '600ms' }}></div>
+                  </div>
+                </div>
+              </div>
+            )}
+            
             <div ref={messagesEndRef} />
           </div>
 
           {/* Feedback section */}
           {feedback && (
-            <div className="bg-white rounded-lg shadow p-4 mb-4">
+            <div className="bg-white rounded-lg shadow p-4 mb-4 text-black">
               <h2 className="text-lg font-semibold mb-3">Conversation Feedback</h2>
               
               <div className="mb-4">
@@ -280,15 +551,24 @@ export default function ChatPage() {
               </div>
               
               <div className="mt-4 pt-3 border-t">
-                <p className="text-gray-700">{feedback.summary}</p>
+                <p className="text-gray-800">{feedback.summary}</p>
               </div>
             </div>
           )}
 
-          {/* Transcript display when recording/processing */}
-          {(isRecording || isProcessing) && transcript && (
+          {/* Live transcription display */}
+          {isRecording && transcript && (
+            <div className="bg-blue-50 border border-blue-100 rounded-lg p-3 mb-4">
+              <p className="text-sm text-black">
+                <span className="font-medium">Live transcription:</span> {transcript}
+              </p>
+            </div>
+          )}
+
+          {/* Transcript display when processing */}
+          {!isRecording && isProcessing && transcript && (
             <div className="bg-gray-100 rounded-lg p-3 mb-4">
-              <p className="text-sm text-gray-600">
+              <p className="text-sm text-black">
                 <span className="font-medium">Transcript:</span> {transcript}
               </p>
             </div>
@@ -333,13 +613,13 @@ export default function ChatPage() {
         {/* Status text */}
         <div className="text-center mt-3">
           {permissionGranted === false ? (
-            <p className="text-red-500 text-sm">Microphone access denied. Please enable it in your browser settings.</p>
+            <p className="text-red-500 text-sm font-medium">Microphone access denied. Please enable it in your browser settings.</p>
           ) : isProcessing ? (
-            <p className="text-gray-500 text-sm">Processing...</p>
+            <p className="text-gray-700 text-sm font-medium">Processing...</p>
           ) : isRecording ? (
-            <p className="text-red-500 text-sm">Recording... Click to stop</p>
+            <p className="text-red-500 text-sm font-medium">Recording... Click to stop</p>
           ) : !feedback ? (
-            <p className="text-gray-500 text-sm">Click the microphone to start speaking</p>
+            <p className="text-gray-700 text-sm font-medium">Click the microphone to start speaking</p>
           ) : null}
         </div>
       </footer>
@@ -347,7 +627,7 @@ export default function ChatPage() {
       {/* Hidden audio element for playback */}
       <audio 
         ref={audioRef} 
-        onEnded={() => setIsAudioPlaying(false)}
+        preload="auto"
         controls={false}
       />
     </div>
