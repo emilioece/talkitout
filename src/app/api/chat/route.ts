@@ -106,7 +106,7 @@ export async function POST(request: NextRequest) {
     const systemPrompt = videoData ? CAMERA_ENABLED_SYSTEM_PROMPT : BASE_SYSTEM_PROMPT;
     
     // Create the transformed message array for Gemini
-    let geminiMessages = [];
+    const geminiMessages = [];
     
     // Add system prompt as a user message prefix
     geminiMessages.push({
