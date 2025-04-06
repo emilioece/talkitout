@@ -1,42 +1,54 @@
 import { NextRequest, NextResponse } from 'next/server';
-import OpenAI from 'openai';
+import { GoogleGenerativeAI, Part } from '@google/generative-ai';
 
-// Initialize the OpenAI client with API key from environment variables
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY ?? undefined,
-});
+// Initialize the Google Generative AI client with API key from environment variables
+const genAI = new GoogleGenerativeAI(process.env.GOOGLE_AI_API_KEY ?? '');
 
 export async function POST(request: NextRequest) {
   try {
-    // In production with valid API key, use OpenAI's Whisper API
-    if (process.env.NODE_ENV === 'production' && process.env.OPENAI_API_KEY) {
+    // In production with valid API key, use Gemini 1.5 Pro for audio processing
+    if (process.env.NODE_ENV === 'production' && process.env.GOOGLE_AI_API_KEY) {
       try {
         // Get the audio data from the request
         const formData = await request.formData();
         const audioFile = formData.get('audio') as File;
         
         if (audioFile) {
-          // Convert File to Blob and then to Buffer
-          const buffer = Buffer.from(await audioFile.arrayBuffer());
+          // Convert File to ArrayBuffer
+          const audioBytes = await audioFile.arrayBuffer();
           
-          // Use OpenAI Whisper API for transcription
-          const transcriptionResponse = await openai.audio.transcriptions.create({
-            file: new File([buffer], 'audio.webm', { type: 'audio/webm' }),
-            model: 'whisper-1',
-          });
+          // Initialize Gemini 1.5 Pro model, which supports multimodal content including audio
+          const model = genAI.getGenerativeModel({ model: "gemini-1.5-pro" });
+          
+          // Create audio part for Gemini
+          const audioPart: Part = {
+            inlineData: {
+              data: Buffer.from(audioBytes).toString('base64'),
+              mimeType: 'audio/webm',
+            },
+          };
+          
+          // Prompt Gemini to transcribe the audio
+          const result = await model.generateContent([
+            "Transcribe the following audio accurately. Only return the transcript text with no additional explanation or commentary.",
+            audioPart
+          ]);
+          
+          const transcription = result.response.text();
+          console.log('Transcription from Gemini 1.5 Pro:', transcription);
           
           return NextResponse.json({ 
             success: true, 
-            transcript: transcriptionResponse.text 
+            transcript: transcription 
           });
         }
-      } catch (openaiError) {
-        console.error('OpenAI transcription error:', openaiError);
-        // Fall back to simulation if OpenAI API fails
+      } catch (geminiError) {
+        console.error('Gemini transcription error:', geminiError);
+        // Fall back to simulation if Gemini API fails
       }
     }
     
-    // For development or if OpenAI API call fails, simulate transcription
+    // For development or if Gemini API call fails, simulate transcription
     const transcription = "This is a simulated transcription for the MVP.";
     
     return NextResponse.json({ 

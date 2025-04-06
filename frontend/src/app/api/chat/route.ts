@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import OpenAI from 'openai';
+import { GoogleGenerativeAI } from '@google/generative-ai';
 
 // Define proper types for messages
 interface Message {
@@ -8,10 +8,8 @@ interface Message {
   name?: string; // Required for function messages
 }
 
-// Initialize the OpenAI client with API key from environment variables
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY ?? undefined,
-});
+// Initialize the Google Generative AI client with API key from environment variables
+const genAI = new GoogleGenerativeAI(process.env.GOOGLE_AI_API_KEY ?? '');
 
 // Base system prompt for communication feedback
 const BASE_SYSTEM_PROMPT = `I want to practice my conflict resolution skills and I want to role-play a scenario. 
@@ -107,45 +105,69 @@ export async function POST(request: NextRequest) {
     // Choose the appropriate system prompt based on whether camera was used
     const systemPrompt = videoData ? CAMERA_ENABLED_SYSTEM_PROMPT : BASE_SYSTEM_PROMPT;
     
-    // Create the message array for OpenAI with our system prompt
-    const chatMessages = [
-      { role: 'system', content: systemPrompt },
-      ...filteredMessages
-    ];
+    // Create the transformed message array for Gemini
+    let geminiMessages = [];
+    
+    // Add system prompt as a user message prefix
+    geminiMessages.push({
+      role: 'user',
+      parts: [{ text: `${systemPrompt}\n\nPlease remember these instructions throughout our conversation.\n\nMy first message is: ${filteredMessages[0]?.content || "Let's start our conversation."}`}]
+    });
+    
+    // Add the rest of the conversation messages, skipping the first user message
+    for (let i = 1; i < filteredMessages.length; i++) {
+      const msg = filteredMessages[i];
+      geminiMessages.push({
+        role: msg.role === 'user' ? 'user' : 'model',
+        parts: [{ text: msg.content }]
+      });
+    }
     
     // If camera was used, add a note about video analysis
-    if (videoData && videoData.frameCount > 0) {
-      chatMessages.push({
-        role: 'system',
-        content: `Note: The user had their camera enabled during this conversation and recorded ${videoData.frameCount} frames of video. Please include feedback on likely non-verbal communication based on this fact.`
-      });
+    if (videoData && videoData.frameCount > 0 && geminiMessages.length > 0) {
+      const lastMsg = geminiMessages[geminiMessages.length - 1];
+      if (lastMsg.role === 'user') {
+        lastMsg.parts[0].text += `\n\nNote: I had my camera enabled during this conversation and recorded ${videoData.frameCount} frames of video. Please include feedback on likely non-verbal communication based on this fact.`;
+      }
     }
     
     // Check if we need to generate feedback (session ended or 3+ interactions)
     const shouldGenerateFeedback = endSession || interactionCount >= 3;
     
-    // Check if API key is available and try to call OpenAI
-    if (process.env.OPENAI_API_KEY) {
+    // Check if API key is available and try to call Gemini
+    if (process.env.GOOGLE_AI_API_KEY) {
       try {
-        console.log('Calling OpenAI API with messages:', JSON.stringify(chatMessages));
+        console.log('Calling Gemini API with messages');
         
         // If manually ended but insufficient interactions, append a note about early termination
-        if (endSession && interactionCount < 3) {
-          chatMessages.push({
-            role: 'system',
-            content: 'Note: The user has chosen to end the session early. Please provide feedback based on the conversation so far.'
-          });
+        if (endSession && interactionCount < 3 && geminiMessages.length > 0) {
+          const lastMsg = geminiMessages[geminiMessages.length - 1];
+          if (lastMsg.role === 'user') {
+            lastMsg.parts[0].text += '\n\nNote: I have chosen to end the session early. Please provide feedback based on the conversation so far.';
+          }
         }
         
-        const response = await openai.chat.completions.create({
-          model: 'gpt-4o-mini',
-          messages: chatMessages,
-          temperature: 0.7,
-          max_tokens: 1000,
+        // Initialize Gemini model
+        const model = genAI.getGenerativeModel({ model: 'gemini-pro' });
+        
+        // Start the chat
+        const chat = model.startChat({
+          generationConfig: {
+            temperature: 0.7,
+            maxOutputTokens: 1000,
+          },
         });
         
-        const aiResponse = response.choices[0].message.content || '';
-        console.log('Received response from OpenAI:', aiResponse);
+        // Process messages in sequence to preserve context
+        let geminiResponse;
+        for (const msg of geminiMessages) {
+          if (msg.role === 'user') {
+            geminiResponse = await chat.sendMessage(msg.parts[0].text);
+          }
+        }
+        
+        const aiResponse = geminiResponse?.response?.text() || '';
+        console.log('Received response from Gemini');
         
         // Generate feedback if needed
         if (shouldGenerateFeedback) {
@@ -170,13 +192,13 @@ export async function POST(request: NextRequest) {
             generateFeedback: false
           });
         }
-      } catch (openaiError) {
-        console.error('OpenAI API error:', openaiError);
-        // Fall back to simulated responses if OpenAI API fails
+      } catch (geminiError) {
+        console.error('Gemini API error:', geminiError);
+        // Fall back to simulated responses if Gemini API fails
         return simulatedResponse(interactionCount, videoData, endSession);
       }
     } else {
-      console.log('No OpenAI API key found, using simulated response');
+      console.log('No Gemini API key found, using simulated response');
       return simulatedResponse(interactionCount, videoData, endSession);
     }
   } catch (error) {
@@ -231,7 +253,7 @@ function generateConfidenceFeedback(videoData: VideoData) {
   };
 }
 
-// Helper function to provide simulated responses when OpenAI is not available
+// Helper function to provide simulated responses when Gemini is not available
 function simulatedResponse(interactionCount: number, videoData?: VideoData, endSession?: boolean) {
   let response;
   let generateFeedback = false;
@@ -436,7 +458,7 @@ function parseCameraEnabledFeedback(aiResponse: string) {
   }
 }
 
-// Helper function to parse feedback from OpenAI response (regular audio-only sessions)
+// Helper function to parse feedback from Gemini response (regular audio-only sessions)
 function parseFeedback(aiResponse: string) {
   try {
     // Try to extract structured feedback from the response
