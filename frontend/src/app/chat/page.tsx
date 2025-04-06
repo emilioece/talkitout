@@ -57,6 +57,8 @@ type Message = {
 type Feedback = {
   strengths: string[];
   weaknesses: string[];
+  nvcAnalysis?: string[];
+  thomasKilmannAnalysis?: string[];
   improvements: string[];
   summary: string;
 };
@@ -1009,6 +1011,9 @@ export default function ChatPage() {
     const updatedMessages: Message[] = [...messages, { role: "user", content: finalTranscript }];
     setMessages(updatedMessages);
     
+    // Scroll to the latest message
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    
     // Send to API and get response
     try {
       const newInteractionCount = interactionCount + 1;
@@ -1038,11 +1043,16 @@ export default function ChatPage() {
         }),
       });
       
+      const chatData = await chatResponse.json();
+      
       if (!chatResponse.ok) {
-        throw new Error(`Chat API returned ${chatResponse.status}`);
+        throw new Error(`Chat API error: ${chatData.error || chatResponse.status}`);
       }
       
-      const chatData = await chatResponse.json();
+      if (!chatData.success) {
+        throw new Error(`Chat API returned unsuccessful: ${chatData.error || 'Unknown error'}`);
+      }
+      
       console.log('Received response from chat API:', chatData);
       
       if (chatData.success) {

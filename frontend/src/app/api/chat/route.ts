@@ -1,6 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import OpenAI from 'openai';
 
+// Define proper types for messages
+interface Message {
+  role: 'system' | 'user' | 'assistant' | 'function';
+  content: string;
+  name?: string; // Required for function messages
+}
+
 // Initialize the OpenAI client with API key from environment variables
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY ?? undefined,
@@ -12,12 +19,29 @@ You are a coworker that has been consistently lagging behind project deadlines a
 However, you are also a sensitive person, and if I react aggressively or negatively towards you, you will similarly reciprocate. 
 I am your coworker who is confronting you about this issue. I will start the conversation and you can respond to me up to three times as we will have a back and forth. 
 
-Follow these specific guidelines:
-1. For your first two responses, stay completely in character as my sensitive coworker who has missed deadlines.
-2. After my third message, provide BOTH your in-character response AND feedback about how I handled the conversation.
-3. For the third response, FIRST respond in character, THEN after that response, come out of character and provide feedback.
+IMPORTANT: For your first response, randomly select ONE character trait, ONE conflict management style, and ONE agreeableness level from the above lists and MAINTAIN THE SAME CONSISTENT PERSONALITY throughout our entire conversation. Begin your first response by indicating which trait, style, and agreeableness level you've selected, but do this in a hidden way using square brackets that a human wouldn't see as part of your actual response. For example: [TRAIT: DEFENSIVE, STYLE: AVOIDING, AGREEABLENESS: MODERATE]
 
-Structure the feedback section after your third response like this:
+For your second and third responses, do NOT include the trait marker brackets again, but be sure to maintain the EXACT SAME personality traits you initially selected.
+
+FEEDBACK FOCUS:
+After our role-play, analyze my approach through both Nonviolent Communication and Thomas-Kilmann frameworks:
+
+NVC ELEMENTS:
+- How well I made observations without evaluation
+- If I expressed feelings without attributing blame
+- Whether I identified needs behind the conflict
+- Clarity of my requests
+
+THOMAS-KILMANN ANALYSIS:
+- Which conflict mode I primarily demonstrated
+- How effective my approach was given your conflict style
+- Alternative modes that might have been more effective
+
+After my third message, provide BOTH:
+1. Your in-character response based on your selected traits
+2. Detailed feedback using the NVC and Thomas-Kilmann frameworks
+
+Structure the feedback after your third in-character response like this:
 
 STRENGTHS:
 - List 2-3 specific positive aspects of my communication approach
@@ -27,14 +51,21 @@ WEAKNESSES:
 - List 2-3 specific areas where my approach could be improved
 - Be honest but constructive about what I could have done better
 
+NVC ANALYSIS:
+- Evaluate how well I used each component of Nonviolent Communication
+- Provide specific examples from our conversation
+
+THOMAS-KILMANN ANALYSIS:
+- Identify which conflict mode I primarily used
+- Assess its effectiveness against your selected conflict style
+- Suggest alternative approaches that might work better
+
 IMPROVEMENTS:
-- Provide 3 actionable and specific suggestions for how I could handle similar situations better
+- Provide 3 actionable suggestions for handling similar situations better
 - Include practical tips that would lead to better conflict resolution outcomes
 
 SUMMARY:
-A concise paragraph summarizing my overall performance and the most important takeaways for me to remember in future workplace conflicts.
-
-Remember to maintain a professional but supportive tone in your feedback.`;
+A concise paragraph summarizing my overall performance and the most important takeaways for future workplace conflicts.`;
 
 // Extended system prompt when camera is enabled
 const CAMERA_ENABLED_SYSTEM_PROMPT = `I want to practice my conflict resolution skills and I want to role-play a scenario. 
@@ -86,7 +117,7 @@ export async function POST(request: NextRequest) {
     const { messages, interactionCount, videoData, endSession } = await request.json();
     
     // Only filter out system messages from the user input, we'll add our own
-    const filteredMessages = messages.filter((msg: { role: string; content: string }) => 
+    const filteredMessages = messages.filter((msg: Message) => 
       msg.role !== 'system'
     );
     
@@ -429,9 +460,11 @@ function parseFeedback(aiResponse: string) {
     const strengths: string[] = [];
     const weaknesses: string[] = [];
     const improvements: string[] = [];
+    const nvcAnalysis: string[] = [];
+    const thomasKilmannAnalysis: string[] = [];
     let summary = "";
     
-    // Extract STRENGTHS section - using m flag instead of s flag
+    // Extract STRENGTHS section
     const strengthsMatch = aiResponse.match(/STRENGTHS:([\s\S]+?)(?=WEAKNESSES:|$)/);
     if (strengthsMatch && strengthsMatch[1]) {
       const strengthsText = strengthsMatch[1].trim();
@@ -439,15 +472,31 @@ function parseFeedback(aiResponse: string) {
       strengths.push(...strengthsItems);
     }
     
-    // Extract WEAKNESSES section - using m flag instead of s flag
-    const weaknessesMatch = aiResponse.match(/WEAKNESSES:([\s\S]+?)(?=IMPROVEMENTS:|$)/);
+    // Extract WEAKNESSES section
+    const weaknessesMatch = aiResponse.match(/WEAKNESSES:([\s\S]+?)(?=NVC ANALYSIS:|IMPROVEMENTS:|$)/);
     if (weaknessesMatch && weaknessesMatch[1]) {
       const weaknessesText = weaknessesMatch[1].trim();
       const weaknessesItems = weaknessesText.split(/\n-|\n•/).map(item => item.trim()).filter(Boolean);
       weaknesses.push(...weaknessesItems);
     }
     
-    // Extract IMPROVEMENTS section - using m flag instead of s flag
+    // Extract NVC ANALYSIS section
+    const nvcMatch = aiResponse.match(/NVC ANALYSIS:([\s\S]+?)(?=THOMAS-KILMANN ANALYSIS:|IMPROVEMENTS:|$)/);
+    if (nvcMatch && nvcMatch[1]) {
+      const nvcText = nvcMatch[1].trim();
+      const nvcItems = nvcText.split(/\n-|\n•/).map(item => item.trim()).filter(Boolean);
+      nvcAnalysis.push(...nvcItems);
+    }
+    
+    // Extract THOMAS-KILMANN ANALYSIS section
+    const tkMatch = aiResponse.match(/THOMAS-KILMANN ANALYSIS:([\s\S]+?)(?=IMPROVEMENTS:|$)/);
+    if (tkMatch && tkMatch[1]) {
+      const tkText = tkMatch[1].trim();
+      const tkItems = tkText.split(/\n-|\n•/).map(item => item.trim()).filter(Boolean);
+      thomasKilmannAnalysis.push(...tkItems);
+    }
+    
+    // Extract IMPROVEMENTS section
     const improvementsMatch = aiResponse.match(/IMPROVEMENTS:([\s\S]+?)(?=SUMMARY:|$)/);
     if (improvementsMatch && improvementsMatch[1]) {
       const improvementsText = improvementsMatch[1].trim();
@@ -455,7 +504,7 @@ function parseFeedback(aiResponse: string) {
       improvements.push(...improvementsItems);
     }
     
-    // Extract SUMMARY section - using m flag instead of s flag
+    // Extract SUMMARY section
     const summaryMatch = aiResponse.match(/SUMMARY:([\s\S]+?)$/);
     if (summaryMatch && summaryMatch[1]) {
       summary = summaryMatch[1].trim();
@@ -469,6 +518,8 @@ function parseFeedback(aiResponse: string) {
     return {
       strengths: strengths.length > 0 ? strengths : defaultFeedback().strengths,
       weaknesses: weaknesses.length > 0 ? weaknesses : defaultFeedback().weaknesses,
+      nvcAnalysis: nvcAnalysis.length > 0 ? nvcAnalysis : defaultFeedback().nvcAnalysis,
+      thomasKilmannAnalysis: thomasKilmannAnalysis.length > 0 ? thomasKilmannAnalysis : defaultFeedback().thomasKilmannAnalysis,
       improvements: improvements.length > 0 ? improvements : defaultFeedback().improvements,
       summary: summary || defaultFeedback().summary
     };
@@ -488,6 +539,17 @@ function defaultFeedback() {
     weaknesses: [
       "You could provide more specific examples of missed deadlines",
       "The tone could be more empathetic to encourage open communication"
+    ],
+    nvcAnalysis: [
+      "Observations: You made some factual observations about missed deadlines",
+      "Feelings: You expressed some feelings, but could be more clear about how the situation affects you",
+      "Needs: You implied your needs for reliability and teamwork, but didn't state them explicitly",
+      "Requests: Your requests for change were somewhat vague"
+    ],
+    thomasKilmannAnalysis: [
+      "You primarily used a Competing conflict mode",
+      "This was moderately effective given the other person's Avoiding style",
+      "A Collaborating approach might have been more effective for finding mutual solutions"
     ],
     improvements: [
       "Try asking open-ended questions to understand their perspective",
