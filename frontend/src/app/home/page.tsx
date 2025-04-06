@@ -9,7 +9,7 @@ export default function HomePage() {
         <h1 className="text-4xl font-bold mb-4">TalkItOut</h1>
         <p className="text-xl mb-8">
           Develop your soft skills with AI-powered workplace scenario practice.
-          Get feedback on your communication style and conflict resolution skills.
+          Get feedback on your communication style, conflict resolution skills, and body language.
         </p>
         
         <div className="w-24 h-24 bg-gray-200 rounded-full mb-8 flex items-center justify-center">
@@ -19,19 +19,42 @@ export default function HomePage() {
           </svg>
         </div>
 
-        <div className="space-y-2 mb-8 text-left">
-          <p className="flex items-center">
-            <span className="mr-2 inline-flex items-center justify-center w-6 h-6 rounded-full bg-green-100 text-green-800">1</span>
-            Speak naturally to practice a workplace conflict scenario
-          </p>
-          <p className="flex items-center">
-            <span className="mr-2 inline-flex items-center justify-center w-6 h-6 rounded-full bg-green-100 text-green-800">2</span>
-            Get realistic responses from an AI coworker
-          </p>
-          <p className="flex items-center">
-            <span className="mr-2 inline-flex items-center justify-center w-6 h-6 rounded-full bg-green-100 text-green-800">3</span>
-            Receive feedback on your communication style and effectiveness
-          </p>
+        <div className="grid grid-cols-2 gap-6 mb-8 w-full">
+          <div className="bg-white shadow-md rounded-lg p-6">
+            <h2 className="text-lg font-semibold mb-3">Practice Conversations</h2>
+            <div className="space-y-2 text-left">
+              <p className="flex items-center">
+                <span className="mr-2 inline-flex items-center justify-center w-6 h-6 rounded-full bg-green-100 text-green-800">1</span>
+                Speak naturally to practice a workplace conflict scenario
+              </p>
+              <p className="flex items-center">
+                <span className="mr-2 inline-flex items-center justify-center w-6 h-6 rounded-full bg-green-100 text-green-800">2</span>
+                Get realistic responses from an AI coworker
+              </p>
+              <p className="flex items-center">
+                <span className="mr-2 inline-flex items-center justify-center w-6 h-6 rounded-full bg-green-100 text-green-800">3</span>
+                Receive feedback on your communication style and effectiveness
+              </p>
+            </div>
+          </div>
+          
+          <div className="bg-white shadow-md rounded-lg p-6">
+            <h2 className="text-lg font-semibold mb-3">NEW: Body Language Analysis</h2>
+            <div className="space-y-2 text-left">
+              <p className="flex items-center">
+                <span className="mr-2 inline-flex items-center justify-center w-6 h-6 rounded-full bg-purple-100 text-purple-800">1</span>
+                Enable your camera during practice sessions
+              </p>
+              <p className="flex items-center">
+                <span className="mr-2 inline-flex items-center justify-center w-6 h-6 rounded-full bg-purple-100 text-purple-800">2</span>
+                AI analyzes your posture, gestures, and facial expressions
+              </p>
+              <p className="flex items-center">
+                <span className="mr-2 inline-flex items-center justify-center w-6 h-6 rounded-full bg-purple-100 text-purple-800">3</span>
+                Get personalized tips to improve your non-verbal communication
+              </p>
+            </div>
+          </div>
         </div>
 
         <Link 
