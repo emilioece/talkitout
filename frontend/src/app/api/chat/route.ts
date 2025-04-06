@@ -14,10 +14,10 @@ I am your coworker who is confronting you about this issue. I will start the con
 
 Follow these specific guidelines:
 1. For your first two responses, stay completely in character as my sensitive coworker who has missed deadlines.
-2. After my third message, provide BOTH your in-character response AND feedback about how I handled the conversation.
-3. For the third response, FIRST respond in character, THEN after that response, come out of character and provide feedback.
+2. After my fifth message, provide BOTH your in-character response AND feedback about how I handled the conversation.
+3. For the fifth response, FIRST respond in character, THEN after that response, come out of character and provide feedback.
 
-Structure the feedback section after your third response like this:
+Structure the feedback section after your fifth response like this:
 
 STRENGTHS:
 - List 2-3 specific positive aspects of my communication approach
