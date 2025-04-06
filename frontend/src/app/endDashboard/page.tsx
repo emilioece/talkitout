@@ -33,17 +33,22 @@ export default function EndDashboard() {
     // This allows us to store more complex data structures between pages
     const storedCommunicationFeedback = sessionStorage.getItem('communicationFeedback');
     const storedConfidenceFeedback = sessionStorage.getItem('confidenceFeedback');
+    const cameraWasUsed = sessionStorage.getItem('cameraWasUsed') === 'true';
     
     if (storedCommunicationFeedback) {
       setCommunicationFeedback(JSON.parse(storedCommunicationFeedback));
     }
     
-    if (storedConfidenceFeedback) {
+    // Only set confidence feedback if camera was actually used
+    if (storedConfidenceFeedback && cameraWasUsed) {
       setConfidenceFeedback(JSON.parse(storedConfidenceFeedback));
+    } else {
+      // Clear confidence feedback if camera wasn't used
+      setConfidenceFeedback(null);
     }
     
     // If no feedback is available, redirect back to chat
-    if (!storedCommunicationFeedback && !storedConfidenceFeedback) {
+    if (!storedCommunicationFeedback) {
       // Show a brief loading state instead of instantly redirecting
       setTimeout(() => {
         router.push('/chat');
@@ -102,49 +107,17 @@ export default function EndDashboard() {
             </div>
           </div>
 
-          {/* Communication skills section */}
+          {/* Communication skills section - using new component */}
           {communicationFeedback && (
-            <div className="bg-white shadow-md rounded-lg overflow-hidden">
-              <div className="bg-green-600 text-white px-6 py-4">
-                <h2 className="text-xl font-semibold">Communication Skills Analysis</h2>
-              </div>
-              <div className="p-6">
-                <div className="grid md:grid-cols-2 gap-6">
-                  <div>
-                    <h3 className="text-lg font-medium text-green-700 mb-2">Strengths</h3>
-                    <ul className="list-disc pl-5 space-y-2">
-                      {communicationFeedback.strengths.map((strength, i) => (
-                        <li key={i} className="text-gray-700">{strength}</li>
-                      ))}
-                    </ul>
-                  </div>
-                  <div>
-                    <h3 className="text-lg font-medium text-red-700 mb-2">Areas for Improvement</h3>
-                    <ul className="list-disc pl-5 space-y-2">
-                      {communicationFeedback.weaknesses.map((weakness, i) => (
-                        <li key={i} className="text-gray-700">{weakness}</li>
-                      ))}
-                    </ul>
-                  </div>
-                </div>
-
-                <div className="mt-6">
-                  <h3 className="text-lg font-medium text-blue-700 mb-2">Recommended Actions</h3>
-                  <ul className="list-disc pl-5 space-y-2">
-                    {communicationFeedback.improvements.map((improvement, i) => (
-                      <li key={i} className="text-gray-700">{improvement}</li>
-                    ))}
-                  </ul>
-                </div>
-              </div>
-            </div>
+            <CommunicationFeedbackCard feedback={communicationFeedback} />
           )}
 
-          {/* Body language section */}
+          {/* Body language section - only show if confidence feedback exists */}
           {confidenceFeedback && (
             <div className="bg-white shadow-md rounded-lg overflow-hidden">
-              <div className="bg-purple-600 text-white px-6 py-4">
+              <div className="bg-purple-600 text-white px-6 py-4 flex justify-between items-center">
                 <h2 className="text-xl font-semibold">Body Language & Confidence Analysis</h2>
+                <span className="text-xs px-2 py-1 bg-purple-800 rounded">Camera Enabled</span>
               </div>
               <div className="p-6">
                 <div className="grid md:grid-cols-2 gap-6 mb-6">
@@ -174,8 +147,93 @@ export default function EndDashboard() {
               </div>
             </div>
           )}
+          
+          {/* Show a note when camera wasn't used */}
+          {!confidenceFeedback && (
+            <div className="bg-white shadow-md rounded-lg overflow-hidden">
+              <div className="bg-gray-600 text-white px-6 py-4">
+                <h2 className="text-xl font-semibold">Body Language Analysis</h2>
+              </div>
+              <div className="p-6 text-center">
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-12 w-12 mx-auto text-gray-400 mb-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                </svg>
+                <p className="text-gray-700">
+                  Camera was not enabled during this session. Enable your camera during practice to receive feedback on your body language and confidence.
+                </p>
+                <Link 
+                  href="/chat" 
+                  className="inline-block mt-4 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg transition-colors"
+                >
+                  Try Again with Camera
+                </Link>
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </div>
   );
-} 
+}
+
+// Add a new component for dynamic communication feedback display
+const CommunicationFeedbackCard = ({ feedback }: { feedback: Feedback }) => {
+  // Function to check if feedback is about the "missed deadlines" scenario
+  const isMissedDeadlinesScenario = () => {
+    const keyTerms = ['deadline', 'late', 'missing', 'behind schedule', 'on time', 'timely'];
+    const allText = [
+      ...feedback.strengths,
+      ...feedback.weaknesses, 
+      ...feedback.improvements,
+      feedback.summary
+    ].join(' ').toLowerCase();
+    
+    return keyTerms.some(term => allText.includes(term));
+  };
+  
+  // Get appropriate scenario title
+  const getScenarioTitle = () => {
+    if (isMissedDeadlinesScenario()) {
+      return "Addressing Missed Deadlines";
+    } else {
+      return "Difficult Conversation Handling";
+    }
+  };
+  
+  return (
+    <div className="bg-white shadow-md rounded-lg overflow-hidden">
+      <div className="bg-green-600 text-white px-6 py-4">
+        <h2 className="text-xl font-semibold">Communication Skills Analysis: {getScenarioTitle()}</h2>
+      </div>
+      <div className="p-6">
+        <div className="grid md:grid-cols-2 gap-6">
+          <div>
+            <h3 className="text-lg font-medium text-green-700 mb-2">Strengths</h3>
+            <ul className="list-disc pl-5 space-y-2">
+              {feedback.strengths.map((strength, i) => (
+                <li key={i} className="text-gray-700">{strength}</li>
+              ))}
+            </ul>
+          </div>
+          <div>
+            <h3 className="text-lg font-medium text-red-700 mb-2">Areas for Improvement</h3>
+            <ul className="list-disc pl-5 space-y-2">
+              {feedback.weaknesses.map((weakness, i) => (
+                <li key={i} className="text-gray-700">{weakness}</li>
+              ))}
+            </ul>
+          </div>
+        </div>
+
+        <div className="mt-6">
+          <h3 className="text-lg font-medium text-blue-700 mb-2">Recommended Actions</h3>
+          <ul className="list-disc pl-5 space-y-2">
+            {feedback.improvements.map((improvement, i) => (
+              <li key={i} className="text-gray-700">{improvement}</li>
+            ))}
+          </ul>
+        </div>
+      </div>
+    </div>
+  );
+}; 

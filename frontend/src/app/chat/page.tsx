@@ -1017,9 +1017,11 @@ export default function ChatPage() {
       // Show typing indicator
       setIsTyping(true);
       
-      console.log(`Sending message to chat API (interaction ${newInteractionCount}/3)`);
+      // Calculate total user messages BEFORE making API call
+      const userMessageCount = updatedMessages.filter(m => m.role === "user").length;
+      console.log(`Sending message to chat API (user message ${userMessageCount}/5)`);
       
-      // Get response from the ChatGPT API
+      // Pass the user message count to the API
       const chatResponse = await fetch('/api/chat', {
         method: 'POST',
         headers: {
@@ -1028,8 +1030,11 @@ export default function ChatPage() {
         body: JSON.stringify({ 
           messages: updatedMessages,
           interactionCount: newInteractionCount,
+          userMessageCount: userMessageCount, // Add this explicitly
           // Send frame count if camera was used
-          videoData: cameraEnabled ? { frameCount: recordedFrames.length } : null
+          videoData: cameraEnabled ? { frameCount: recordedFrames.length } : null,
+          // Only request feedback generation at exactly 5 messages
+          shouldGenerateFeedback: userMessageCount === 5
         }),
       });
       
@@ -1061,24 +1066,131 @@ export default function ChatPage() {
           await playResponseAudio(aiResponse);
         }
         
-        // Generate feedback if it's the final message
-        if (chatData.generateFeedback && chatData.response.feedback) {
-          generateFeedback(chatData.response.feedback);
+        // Store feedback for dashboard WITHOUT displaying it in the chat
+        if (chatData.response.feedback) {
+          // Don't display feedback in the chat - only store it for the dashboard
+          console.log('Storing feedback for dashboard');
           
-          // If we also have video data, analyze it
-          if (cameraEnabled && recordedFrames.length > 0) {
-            analyzeVideoData();
+          // Store feedback in state but don't display it
+          if (userMessageCount === 5) {
+            setFeedback(chatData.response.feedback);
+            
+            // If we also have video data, analyze it
+            if (cameraEnabled && recordedFrames.length > 0) {
+              analyzeVideoData();
+            }
+            
+            // Redirect to dashboard ONLY after the 5th user message AND after the AI response
+            console.log("Message limit reached (5 user messages), redirecting to dashboard");
+            
+            // Wait for audio to complete if it's playing
+            const redirectDelay = isAudioPlaying ? 3000 : 1500;
+            
+            setTimeout(() => {
+              redirectToDashboard(chatData.response.feedback, chatData.confidenceFeedback);
+            }, redirectDelay);
           }
         }
       }
       
     } catch (error) {
       console.error('Error processing chat:', error);
+      setIsTyping(false);
     } finally {
       setIsProcessing(false);
     }
   };
 
+  // Update redirectToDashboard function to store whether camera was used
+  const redirectToDashboard = (feedback: Feedback | null, confidenceFeedback: ConfidenceFeedback | null) => {
+    console.log("Redirecting to dashboard with feedback:", !!feedback);
+    
+    // Stop any ongoing audio playback - fix the null check
+    if (audioRef.current) {
+      if (!audioRef.current.paused) {
+        audioRef.current.pause();
+        setIsAudioPlaying(false);
+      }
+    }
+    
+    // Generate a unique session ID for this completed session
+    const sessionId = Date.now().toString();
+    
+    // Store flag indicating whether camera was used
+    sessionStorage.setItem('cameraWasUsed', cameraEnabled ? 'true' : 'false');
+    
+    // Store feedback in sessionStorage for the dashboard to retrieve
+    if (feedback) {
+      sessionStorage.setItem('communicationFeedback', JSON.stringify(feedback));
+    } else {
+      // Create a default feedback if none provided
+      const defaultFeedback: Feedback = {
+        strengths: ["You initiated the difficult conversation"],
+        weaknesses: ["Session ended early"],
+        improvements: ["Complete the full conversation next time"],
+        summary: "Your practice session ended before completion. Continue practicing to get more comprehensive feedback."
+      };
+      sessionStorage.setItem('communicationFeedback', JSON.stringify(defaultFeedback));
+    }
+    
+    if (confidenceFeedback) {
+      sessionStorage.setItem('confidenceFeedback', JSON.stringify(confidenceFeedback));
+    }
+    
+    sessionStorage.setItem('lastSessionId', sessionId);
+    
+    // Mark session as ended
+    setSessionEnded(true);
+    
+    // Force immediate navigation using the most reliable method for this specific browser
+    console.log("Navigating to endDashboard");
+    
+    // Use direct window.location for most reliable redirect
+    window.location.href = `/endDashboard?sessionId=${sessionId}`;
+  };
+
+  // Updated reset function to reset session state
+  const resetConversation = () => {
+    setMessages([{
+      role: "system",
+      content: "Welcome! Press the microphone button to begin the scenario. You'll be speaking with a coworker who has consistently missed deadlines."
+    }]);
+    setTranscript("");
+    setIsRecording(false);
+    setIsProcessing(false);
+    setInteractionCount(0);
+    setFeedback(null);
+    setConfidenceFeedback(null);
+    setRecordedFrames([]);
+    setSessionEnded(false);
+  };
+
+  // Add a useEffect hook to monitor camera state and video element
+  useEffect(() => {
+    if (cameraEnabled && videoStreamRef.current) {
+      console.log("Camera enabled, attempting direct initialization");
+      // Small delay to ensure DOM is ready
+      setTimeout(() => {
+        initializeVideoDirectly();
+      }, 50);
+    }
+  }, [cameraEnabled]);
+
+  // Clean up resources when component unmounts
+  useEffect(() => {
+    return () => {
+      console.log("Component unmounting, cleaning up camera resources");
+      if (videoStreamRef.current) {
+        videoStreamRef.current.getTracks().forEach(track => track.stop());
+      }
+      
+      if (frameIntervalRef.current) {
+        clearInterval(frameIntervalRef.current);
+      }
+    };
+  }, []);
+
+  // Restore the audio playback function
   const playResponseAudio = async (text: string) => {
     try {
       // If we are already playing this message, toggle pause/play
@@ -1127,27 +1239,54 @@ export default function ChatPage() {
         // Create a new Audio element to avoid any stale state issues
         audioRef.current.src = data.audioUrl;
         
-        // The onplay event will set isAudioPlaying to true
-        console.log('Starting audio playback');
-        await audioRef.current.play()
-          .catch(err => {
-            console.error("Audio playback start error:", err);
+        // Return a promise that resolves when audio finishes playing
+        return new Promise<void>((resolve) => {
+          // Set up an event listener for when audio completes
+          const handleAudioEnd = () => {
+            console.log('Audio playback completed');
             setIsAudioPlaying(false);
             currentPlayingMessageRef.current = "";
-          });
+            if (audioRef.current) {
+              audioRef.current.removeEventListener('ended', handleAudioEnd);
+            }
+            resolve();
+          };
+          
+          // Add the event listener
+          if (audioRef.current) {
+            audioRef.current.addEventListener('ended', handleAudioEnd);
+            
+            // Start playing
+            console.log('Starting audio playback');
+            audioRef.current.play()
+              .catch(err => {
+                console.error("Audio playback start error:", err);
+                setIsAudioPlaying(false);
+                currentPlayingMessageRef.current = "";
+                if (audioRef.current) {
+                  audioRef.current.removeEventListener('ended', handleAudioEnd);
+                }
+                resolve(); // Resolve anyway to continue the flow
+              });
+          } else {
+            resolve(); // Resolve if audio ref is null
+          }
+        });
       } else {
         console.error("Failed to get audio URL from speech API");
         setIsAudioPlaying(false);
         currentPlayingMessageRef.current = "";
+        return Promise.resolve(); // Return resolved promise to continue flow
       }
     } catch (error) {
       console.error("Error generating audio:", error);
       setIsAudioPlaying(false);
       currentPlayingMessageRef.current = "";
+      return Promise.resolve(); // Return resolved promise to continue flow
     }
   };
 
-  // Analyze video data to generate confidence feedback
+  // Restore the function to analyze video data
   const analyzeVideoData = async () => {
     try {
       if (!cameraEnabled || recordedFrames.length === 0) return;
@@ -1175,33 +1314,7 @@ export default function ChatPage() {
     }
   };
 
-  const generateFeedback = (apiFeedback?: Feedback) => {
-    if (apiFeedback) {
-      setFeedback(apiFeedback);
-      return;
-    }
-    
-    // Fallback to simulated feedback if none provided from API
-    setTimeout(() => {
-      setFeedback({
-        strengths: [
-          "You approached the conversation directly without being confrontational",
-          "You focused on the impact of the behavior rather than attacking the person"
-        ],
-        weaknesses: [
-          "You could provide more specific examples of missed deadlines",
-          "The tone could be more empathetic to encourage open communication"
-        ],
-        improvements: [
-          "Try asking open-ended questions to understand their perspective",
-          "Offer specific support or resources to help address the issue",
-          "Establish clear expectations and follow-up plans"
-        ],
-        summary: "You demonstrated good basic conflict resolution skills by addressing the issue directly. To improve, focus on being more specific about the problem while showing more empathy and offering concrete solutions."
-      });
-    }, 1000);
-  };
-
+  // Restore the helper function to play audio
   const playAudio = (messageText: string) => {
     playResponseAudio(messageText)
       .catch(err => {
@@ -1211,118 +1324,66 @@ export default function ChatPage() {
       });
   };
 
-  // Function to end current session and navigate to results dashboard
-  const endSession = async () => {
+  // Restore the end session function while keeping the redirect on 5 messages fix
+  const endSession = () => {
+    console.log("End session button clicked");
     setIsProcessing(true);
     
-    try {
-      // Stop any ongoing recording
-      if (isRecording) {
-        // Stop speech recognition
-        if (recognitionRef.current) {
-          recognitionRef.current.stop();
-        }
-        
-        // Stop video recording
-        if (cameraEnabled && frameIntervalRef.current) {
-          clearInterval(frameIntervalRef.current);
-          frameIntervalRef.current = null;
-          setIsRecordingVideo(false);
-        }
-        
-        setIsRecording(false);
+    // Stop any ongoing recording
+    if (isRecording) {
+      // Stop speech recognition
+      if (recognitionRef.current) {
+        recognitionRef.current.stop();
       }
       
-      // Get feedback based on current interaction state
-      const chatResponse = await fetch('/api/chat', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ 
-          messages,
-          interactionCount: Math.max(interactionCount, 3), // Ensure we get feedback
-          videoData: cameraEnabled ? { frameCount: recordedFrames.length } : null,
-          endSession: true // Signal that session was ended manually
-        }),
-      });
-      
-      if (chatResponse.ok) {
-        const chatData = await chatResponse.json();
-        
-        if (chatData.success) {
-          // Process feedback
-          if (chatData.response.feedback) {
-            setFeedback(chatData.response.feedback);
-            // Store in sessionStorage for the endDashboard to retrieve
-            sessionStorage.setItem('communicationFeedback', JSON.stringify(chatData.response.feedback));
-          }
-          
-          // Process confidence feedback if available
-          if (chatData.confidenceFeedback) {
-            setConfidenceFeedback(chatData.confidenceFeedback);
-            // Store in sessionStorage for the endDashboard to retrieve
-            sessionStorage.setItem('confidenceFeedback', JSON.stringify(chatData.confidenceFeedback));
-          }
-          
-          // Generate a unique session ID for this completed session
-          const sessionId = Date.now().toString();
-          sessionStorage.setItem('lastSessionId', sessionId);
-          
-          // Mark session as ended and redirect to results dashboard
-          setSessionEnded(true);
-          
-          // Redirect to the endDashboard with the session ID
-          router.push(`/endDashboard?sessionId=${sessionId}`);
-        }
-      }
-    } catch (error) {
-      console.error('Error ending session:', error);
-    } finally {
-      setIsProcessing(false);
-    }
-  };
-
-  // Updated reset function to reset session state
-  const resetConversation = () => {
-    setMessages([{
-      role: "system",
-      content: "Welcome! Press the microphone button to begin the scenario. You'll be speaking with a coworker who has consistently missed deadlines."
-    }]);
-    setTranscript("");
-    setIsRecording(false);
-    setIsProcessing(false);
-    setInteractionCount(0);
-    setFeedback(null);
-    setConfidenceFeedback(null);
-    setRecordedFrames([]);
-    setSessionEnded(false);
-  };
-
-  // Add a useEffect hook to monitor camera state and video element
-  useEffect(() => {
-    if (cameraEnabled && videoStreamRef.current) {
-      console.log("Camera enabled, attempting direct initialization");
-      // Small delay to ensure DOM is ready
-      setTimeout(() => {
-        initializeVideoDirectly();
-      }, 50);
-    }
-  }, [cameraEnabled]);
-
-  // Clean up resources when component unmounts
-  useEffect(() => {
-    return () => {
-      console.log("Component unmounting, cleaning up camera resources");
-      if (videoStreamRef.current) {
-        videoStreamRef.current.getTracks().forEach(track => track.stop());
-      }
-      
-      if (frameIntervalRef.current) {
+      // Stop video recording
+      if (cameraEnabled && frameIntervalRef.current) {
         clearInterval(frameIntervalRef.current);
+        frameIntervalRef.current = null;
+        setIsRecordingVideo(false);
       }
-    };
-  }, []);
+      
+      setIsRecording(false);
+    }
+    
+    // If we already have feedback, use it
+    if (feedback) {
+      redirectToDashboard(feedback, confidenceFeedback);
+      return;
+    }
+    
+    // Otherwise try to get feedback from the API
+    fetch('/api/chat', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ 
+        messages,
+        // Always use 5 as the threshold to ensure consistent feedback format
+        interactionCount: 5,
+        userMessageCount: 5,
+        videoData: cameraEnabled ? { frameCount: recordedFrames.length } : null,
+        endSession: true, // Signal that session was ended manually
+        shouldGenerateFeedback: true // Always generate feedback for manual end
+      }),
+    })
+      .then(response => response.json())
+      .then(data => {
+        if (data.success && data.response.feedback) {
+          // Redirect with the feedback
+          redirectToDashboard(data.response.feedback, data.confidenceFeedback);
+        } else {
+          // Redirect with no feedback
+          redirectToDashboard(null, null);
+        }
+      })
+      .catch(error => {
+        console.error("Error getting feedback:", error);
+        // Redirect anyway, with no feedback
+        redirectToDashboard(null, null);
+      });
+  };
 
   return (
     <div className="flex flex-col h-screen max-h-screen bg-gray-50">
@@ -1411,18 +1472,18 @@ export default function ChatPage() {
           
           {/* Input area */}
           <div className="p-4 border-t border-gray-200 bg-white">
-            {feedback || sessionEnded ? (
-              <div className="space-y-4">
-                <div className="text-center">
-                  <div className="inline-block animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-blue-600 mb-4"></div>
-                  <p className="text-gray-700">Redirecting to results dashboard...</p>
-                </div>
-              </div>
-            ) : (
-              <div className="flex flex-col items-center">
-                <div className="flex w-full justify-between mb-4">
-                  <div className="w-32"></div> {/* Spacer for balance */}
-                  <div className="flex-grow">
+            <div className="flex flex-col items-center">
+              {/* End Session and Controls Row */}
+              <div className="flex w-full justify-between mb-4">
+                <div className="w-32"></div> {/* Spacer for balance */}
+                
+                <div className="flex-grow">
+                  {feedback || sessionEnded ? (
+                    <div className="text-center">
+                      <div className="inline-block animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-blue-600 mb-2"></div>
+                      <p className="text-gray-700">Redirecting to results dashboard...</p>
+                    </div>
+                  ) : (
                     <div className="text-gray-700 text-center">
                       {isRecording ? (
                         <div>
@@ -1435,19 +1496,23 @@ export default function ChatPage() {
                         <p>Press the microphone button and speak to respond to the scenario.</p>
                       )}
                     </div>
-                  </div>
-                  <button
-                    onClick={endSession}
-                    disabled={isProcessing || messages.length <= 1}
-                    className={`w-32 px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg transition-colors ${
-                      (isProcessing || messages.length <= 1) ? 'opacity-50 cursor-not-allowed' : ''
-                    }`}
-                  >
-                    End Session
-                  </button>
+                  )}
                 </div>
                 
-                {/* Centered mic button */}
+                {/* Always show End Session button */}
+                <button
+                  onClick={endSession}
+                  disabled={isProcessing || messages.length <= 1}
+                  className={`w-32 px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg transition-colors ${
+                    (isProcessing || messages.length <= 1) ? 'opacity-50 cursor-not-allowed' : ''
+                  }`}
+                >
+                  End Session
+                </button>
+              </div>
+              
+              {/* Mic button - Only show if not redirecting */}
+              {!feedback && !sessionEnded && (
                 <button
                   onClick={toggleRecording}
                   disabled={isProcessing}
@@ -1469,8 +1534,8 @@ export default function ChatPage() {
                     </svg>
                   )}
                 </button>
-              </div>
-            )}
+              )}
+            </div>
           </div>
         </div>
         
