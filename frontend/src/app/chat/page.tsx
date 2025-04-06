@@ -55,6 +55,8 @@ type Message = {
 type Feedback = {
   strengths: string[];
   weaknesses: string[];
+  nvcAnalysis?: string[];
+  thomasKilmannAnalysis?: string[];
   improvements: string[];
   summary: string;
 };
@@ -205,6 +207,9 @@ export default function ChatPage() {
     const updatedMessages: Message[] = [...messages, { role: "user", content: finalTranscript }];
     setMessages(updatedMessages);
     
+    // Scroll to the latest message
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    
     // Send to API and get response
     try {
       const newInteractionCount = interactionCount + 1;
@@ -215,7 +220,7 @@ export default function ChatPage() {
       
       console.log(`Sending message to chat API (interaction ${newInteractionCount}/3)`);
       
-      // Get response from the ChatGPT API
+      // Get response from the OpenAI API
       const chatResponse = await fetch('/api/chat', {
         method: 'POST',
         headers: {
@@ -227,43 +232,37 @@ export default function ChatPage() {
         }),
       });
       
+      const chatData = await chatResponse.json();
+      
       if (!chatResponse.ok) {
-        throw new Error(`Chat API returned ${chatResponse.status}`);
+        throw new Error(`Chat API error: ${chatData.error || chatResponse.status}`);
       }
       
-      const chatData = await chatResponse.json();
+      if (!chatData.success) {
+        throw new Error(`Chat API returned unsuccessful: ${chatData.error || 'Unknown error'}`);
+      }
+      
       console.log('Received response from chat API:', chatData);
       
-      if (chatData.success) {
-        const aiResponse = chatData.response.message;
-        
-        // Add assistant message
-        const newMessages: Message[] = [...updatedMessages, { role: "assistant", content: aiResponse }];
-        setMessages(newMessages);
-        
-        // Hide typing indicator
-        setIsTyping(false);
-        
-        // Automatically play audio for the response
-        if (autoPlayEnabled) {
-          console.log('Auto-play enabled, playing response audio');
-          await playResponseAudio(aiResponse);
-        }
-        
-        // Check if we need to generate feedback (after 3 interactions)
-        if (newInteractionCount >= 3 && chatData.generateFeedback && chatData.response.feedback) {
-          console.log('Generating feedback after final interaction');
-          generateFeedback(chatData.response.feedback);
-        }
-      } else {
-        // Handle API error with fallback response
-        console.error('Chat API returned error:', chatData.error);
-        const fallbackResponse = "I understand your concern. Let me think about how to improve my work on deadlines.";
-        const newMessages: Message[] = [...updatedMessages, { role: "assistant", content: fallbackResponse }];
-        setMessages(newMessages);
-        
-        // Hide typing indicator
-        setIsTyping(false);
+      const aiResponse = chatData.response.message;
+      
+      // Add assistant message
+      const newMessages: Message[] = [...updatedMessages, { role: "assistant", content: aiResponse }];
+      setMessages(newMessages);
+      
+      // Hide typing indicator
+      setIsTyping(false);
+      
+      // Automatically play audio for the response
+      if (autoPlayEnabled) {
+        console.log('Auto-play enabled, playing response audio');
+        await playResponseAudio(aiResponse);
+      }
+      
+      // Check if we need to generate feedback (after 3 interactions)
+      if (newInteractionCount >= 3 && chatData.generateFeedback && chatData.response.feedback) {
+        console.log('Generating feedback after final interaction');
+        generateFeedback(chatData.response.feedback);
       }
       
       setIsProcessing(false);
@@ -274,10 +273,24 @@ export default function ChatPage() {
       setIsTyping(false);
       setIsProcessing(false);
       
-      // Fallback response
-      const fallbackResponse = "I'm sorry, I'm having trouble understanding. Could you try again?";
-      const newMessages: Message[] = [...updatedMessages, { role: "assistant", content: fallbackResponse }];
+      // Show error message to user as a system message
+      const errorMessage = error instanceof Error ? error.message : 'Failed to get response';
+      const systemErrorMessage = `Error: ${errorMessage}. Please ensure your OpenAI API key is configured correctly and try again.`;
+      
+      // Add system error message
+      const newMessages: Message[] = [
+        ...updatedMessages, 
+        { 
+          role: "system", 
+          content: systemErrorMessage
+        }
+      ];
       setMessages(newMessages);
+      
+      // Reset interaction count if this was an API error
+      if (errorMessage.includes('OpenAI')) {
+        setInteractionCount(interactionCount);
+      }
     }
   };
 
@@ -365,6 +378,14 @@ export default function ChatPage() {
         weaknesses: [
           "You could provide more specific examples of missed deadlines",
           "The tone could be more empathetic to encourage open communication"
+        ],
+        nvcAnalysis: [
+          "You approached the conversation directly without being confrontational",
+          "You focused on the impact of the behavior rather than attacking the person"
+        ],
+        thomasKilmannAnalysis: [
+          "You approached the conversation directly without being confrontational",
+          "You focused on the impact of the behavior rather than attacking the person"
         ],
         improvements: [
           "Try asking open-ended questions to understand their perspective",
@@ -540,6 +561,28 @@ export default function ChatPage() {
                   ))}
                 </ul>
               </div>
+              
+              {feedback.nvcAnalysis && feedback.nvcAnalysis.length > 0 && (
+                <div className="mb-4">
+                  <h3 className="text-purple-600 font-medium mb-2">Nonviolent Communication Analysis</h3>
+                  <ul className="list-disc pl-5 space-y-1">
+                    {feedback.nvcAnalysis.map((item, index) => (
+                      <li key={`nvc-${index}`}>{item}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              
+              {feedback.thomasKilmannAnalysis && feedback.thomasKilmannAnalysis.length > 0 && (
+                <div className="mb-4">
+                  <h3 className="text-teal-600 font-medium mb-2">Thomas-Kilmann Conflict Mode Analysis</h3>
+                  <ul className="list-disc pl-5 space-y-1">
+                    {feedback.thomasKilmannAnalysis.map((item, index) => (
+                      <li key={`tk-${index}`}>{item}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
               
               <div className="mb-4">
                 <h3 className="text-blue-600 font-medium mb-2">Recommendations</h3>
